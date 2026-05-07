@@ -1,0 +1,97 @@
+# =============================================================================
+# Clean Compute Template Test Configuration
+# =============================================================================
+
+
+# -----------------------------------------------------------------------------
+# 1. Test Datasets Configuration
+# Define the datasets to be used in testing. Each dataset will be created as a 
+# Spark view with generated test data.
+# All the datasets here should match the datasets in the question builder UI.
+# Sample config:
+# datasets:
+#   owner:
+#     schema: ["ID", "CUSTOMER_NAME", "CUSTOMER_EMAIL", "CUSTOMER_PHONE", "CUSTOMER_ADDRESS", "SIGNUP_DATE", "STATUS"]
+#     types: ["integer", "string", "string", "string", "string", "date", "string"]
+#     num_rows: 20
+
+#   partner:
+#     schema: ["ID", "CUSTOMER_ID", "ORDER_DATE", "PRODUCT_NAME", "QUANTITY", "PRICE", "STATUS"]
+#     types: ["integer", "integer", "date", "string", "integer", "float", "string"]
+#     num_rows: 50
+
+# -----------------------------------------------------------------------------
+datasets:
+  owner:
+    schema: ["ID", "CUSTOMER_NAME", "CUSTOMER_EMAIL", "CUSTOMER_PHONE", "CUSTOMER_ADDRESS", "SIGNUP_DATE", "STATUS"]
+    types: ["integer", "string", "string", "string", "string", "date", "string"]
+    num_rows: 20
+
+  partner:
+    schema: ["ID", "CUSTOMER_ID", "ORDER_DATE", "PRODUCT_NAME", "QUANTITY", "PRICE", "STATUS"]
+    types: ["integer", "integer", "date", "string", "integer", "float", "string"]
+    num_rows: 50
+
+# -----------------------------------------------------------------------------
+# 2. Dataset Types with Column Macro Mapping (Version 1.1+ only)
+# Define dataset types with additional column macro mappings for question builder UI
+# column_macro_mapping is the same when you cofing Assign Datasets/Assign Dataset Fields
+# Only available for template version 1.1 and above
+# Sample config:
+# dataset_types:
+#   owner:
+#     schema: ["ID", "CUSTOMER_NAME", "CUSTOMER_EMAIL", "CUSTOMER_PHONE", "CUSTOMER_ADDRESS", "SIGNUP_DATE", "STATUS"]
+#     types: ["integer", "string", "string", "string", "string", "date", "string"]
+#     column_macro_mapping:
+#       ID: "ID"
+#     num_rows: 20
+    
+#   partner:
+#     schema: ["ID", "CUSTOMER_ID", "ORDER_DATE", "PRODUCT_NAME", "QUANTITY", "PRICE", "STATUS"]
+#     types: ["integer", "integer", "date", "string", "integer", "float", "string"]
+#     column_macro_mapping:
+#       ID: "ID"
+#     num_rows: 50
+# -----------------------------------------------------------------------------
+dataset_types:
+  owner:
+    schema: ["ID", "CUSTOMER_NAME", "CUSTOMER_EMAIL", "CUSTOMER_PHONE", "CUSTOMER_ADDRESS", "SIGNUP_DATE", "STATUS"]
+    types: ["integer", "string", "string", "string", "string", "date", "string"]
+    column_macro_mapping:
+      ID: "ID"
+      CUSTOMER_NAME: "CUSTOMER_NAME"
+      CUSTOMER_EMAIL: "CUSTOMER_EMAIL"
+      CUSTOMER_PHONE: "CUSTOMER_PHONE"
+      CUSTOMER_ADDRESS: "CUSTOMER_ADDRESS"
+      SIGNUP_DATE: "SIGNUP_DATE"
+      STATUS: "STATUS"
+    num_rows: 20
+    
+  partner:
+    schema: ["ID", "CUSTOMER_ID", "ORDER_DATE", "PRODUCT_NAME", "QUANTITY", "PRICE", "STATUS"]
+    types: ["integer", "integer", "date", "string", "integer", "float", "string"]
+    column_macro_mapping:
+      ID: "ID"
+      CUSTOMER_ID: "CUSTOMER_ID"
+      ORDER_DATE: "ORDER_DATE"
+      PRODUCT_NAME: "PRODUCT_NAME"
+      QUANTITY: "QUANTITY"
+      PRICE: "PRICE"
+      STATUS: "STATUS"
+    num_rows: 50
+
+
+# -----------------------------------------------------------------------------
+# 3. Test Parameters
+# Configuration for the test execution environment
+# -----------------------------------------------------------------------------
+
+# Enable output of debug/intermediate files
+has_extra_outputs: true
+
+# Runtime Parameters
+# run parameters when you set the run parameters in the question builder UI.
+run_parameters:
+  START_DATE:
+    value: "2023-01-01"
+    type: "string"

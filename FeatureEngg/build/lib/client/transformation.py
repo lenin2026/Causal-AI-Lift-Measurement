@@ -57,20 +57,17 @@ class Transformation:
 
         exposure_df = self.data_handler.read("raw_exposure")
         conversion_df = self.data_handler.read("raw_conversion")
-        map_df = self.data_handler.read("map_transcode")
-        campaign_df = self.data_handler.read("campaign_mapping")
+        # map_df = self.data_handler.read("map_transcode")
+        # campaign_df = self.data_handler.read("campaign_mapping")
         demographic_df = self.data_handler.read("sample_insights")
 
-        CAMPAIGN_ID = self.data_handler.get_run_parameter_value("CAMPAIGN_ID")
+        # CAMPAIGN_ID = self.data_handler.get_run_parameter_value("CAMPAIGN_ID")
         
         result = CustomCode(self.custom_packages_path).custom_func(
             self.spark,
             conversion_df,
             exposure_df,
-            map_df,
-            campaign_df,
             demographic_df,
-            CAMPAIGN_ID
         )
         self.data_handler.write(result)
 

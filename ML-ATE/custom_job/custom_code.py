@@ -57,7 +57,7 @@ class CustomCode:
         # Assign random folds
         ml_data = ml_data.withColumn("fold", (F.rand(seed=42) * num_folds).cast(IntegerType()))
         
-        lr_y = LinearRegression(labelCol="post_campaign_total_order_value", featuresCol="features", predictionCol="y_hat", maxIter=10, tol=1e-3)
+        lr_y = LinearRegression(labelCol="post_campaign_total_order_value", featuresCol="features", predictionCol="y_hat", maxIter=10, tol=1e-3, loss="huber", epsilon=1.35)
         lr_t = LogisticRegression(featuresCol="features", labelCol="treatment", probabilityCol="probability", predictionCol="t_pred", maxIter=10, regParam=0.1, tol=1e-3)
 
         oof_predictions = []
@@ -80,8 +80,10 @@ class CustomCode:
 
         # Calculate unbiased residuals
         ml_data_cv = ml_data_cv.withColumn("y_res", F.col("post_campaign_total_order_value") - F.col("y_hat"))
-        ml_data_cv = ml_data_cv.withColumn("t_hat", vector_to_array(F.col("probability"))[1])\
-                               .withColumn("t_res", F.col("treatment") - F.col("t_hat"))
+        ml_data_cv = ml_data_cv.withColumn("t_hat", F.when(F.col("t_hat") > 0.95, 0.95)
+                                                     .when(F.col("t_hat") < 0.05, 0.05)
+                                                     .otherwise(F.col("t_hat")))
+        ml_data_cv = ml_data_cv.withColumn("t_res", F.col("treatment") - F.col("t_hat"))
 
         # ATE with residuals (Causal Link b/w Y_res and T_res)
         final_assembler = VectorAssembler(inputCols=["t_res"], outputCol="final_features", handleInvalid="skip")

@@ -80,6 +80,7 @@ class CustomCode:
 
         # Calculate unbiased residuals
         ml_data_cv = ml_data_cv.withColumn("y_res", F.col("post_campaign_total_order_value") - F.col("y_hat"))
+        ml_data_cv = ml_data_cv.withColumn("t_hat", vector_to_array(F.col("probability"))[1])
         ml_data_cv = ml_data_cv.withColumn("t_hat", F.when(F.col("t_hat") > 0.95, 0.95)
                                                      .when(F.col("t_hat") < 0.05, 0.05)
                                                      .otherwise(F.col("t_hat")))

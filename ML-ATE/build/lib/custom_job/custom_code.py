@@ -6,6 +6,7 @@ from pyspark.sql.types import DoubleType, IntegerType
 from pyspark.ml.classification import LogisticRegression
 from pyspark.ml.feature import VectorAssembler, StringIndexer
 from pyspark.ml.evaluation import RegressionEvaluator, BinaryClassificationEvaluator
+from functools import reduce
 
 # from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
 # from dowhy import CausalModel
@@ -51,27 +52,43 @@ class CustomCode:
                                                ], outputCol="features", handleInvalid="skip")
         ml_data = assembler.transform(ml_data)
 
-        # Outcome model
-        lr_y = LinearRegression(labelCol="post_campaign_total_order_value", featuresCol="features", predictionCol="y_hat", maxIter=10, tol=1e-3)
-        model_y = lr_y.fit(ml_data)
-
-        # Unexplained spend
-        ml_data = model_y.transform(ml_data).withColumn("y_res", F.col("post_campaign_total_order_value") - F.col("y_hat"))
-
-        # Treatment model
-        lr_t = LogisticRegression(featuresCol="features", labelCol="treatment", probabilityCol="probability", predictionCol="t_pred", maxIter=10, regParam=0.1, tol=1e-3)
-        # lr_t = LinearRegression(featuresCol="features", labelCol="treatment", predictionCol="t_hat", maxIter=10, tol=1e-3)
-        model_t = lr_t.fit(ml_data)
+        # ── Cross-Fitting (K-Fold Cross Validation) ────────────────────────
+        num_folds = 5
+        # Assign random folds
+        ml_data = ml_data.withColumn("fold", (F.rand(seed=42) * num_folds).cast(IntegerType()))
         
-        # Unexplained exposure
-        ml_data = model_t.transform(ml_data)
-        ml_data = ml_data.withColumn("t_hat", vector_to_array(F.col("probability"))[1])\
-                         .withColumn("t_res", F.col("treatment") - F.col("t_hat"))
+        lr_y = LinearRegression(labelCol="post_campaign_total_order_value", featuresCol="features", predictionCol="y_hat", maxIter=10, tol=1e-3, loss="huber", epsilon=1.35)
+        lr_t = LogisticRegression(featuresCol="features", labelCol="treatment", probabilityCol="probability", predictionCol="t_pred", maxIter=10, regParam=0.1, tol=1e-3)
+
+        oof_predictions = []
+
+        # Iterate through folds to generate unbiased out-of-fold predictions
+        for k in range(num_folds):
+            train_df = ml_data.filter(F.col("fold") != k)
+            test_df  = ml_data.filter(F.col("fold") == k)
+
+            model_y_k = lr_y.fit(train_df)
+            model_t_k = lr_t.fit(train_df)
+
+            scored_k = model_y_k.transform(test_df)
+            scored_k = model_t_k.transform(scored_k)
+            
+            oof_predictions.append(scored_k)
+
+        # Union all out-of-fold predictions back together
+        ml_data_cv = reduce(DataFrame.unionByName, oof_predictions)
+
+        # Calculate unbiased residuals
+        ml_data_cv = ml_data_cv.withColumn("y_res", F.col("post_campaign_total_order_value") - F.col("y_hat"))
+        ml_data_cv = ml_data_cv.withColumn("t_hat", vector_to_array(F.col("probability"))[1])
+        ml_data_cv = ml_data_cv.withColumn("t_hat", F.when(F.col("t_hat") > 0.95, 0.95)
+                                                     .when(F.col("t_hat") < 0.05, 0.05)
+                                                     .otherwise(F.col("t_hat")))
+        ml_data_cv = ml_data_cv.withColumn("t_res", F.col("treatment") - F.col("t_hat"))
 
         # ATE with residuals (Causal Link b/w Y_res and T_res)
-        # How much of y_res can be explained by t_res?
         final_assembler = VectorAssembler(inputCols=["t_res"], outputCol="final_features", handleInvalid="skip")
-        final_ml_data = final_assembler.transform(ml_data)
+        final_ml_data = final_assembler.transform(ml_data_cv)
 
         causal_model = LinearRegression(featuresCol="final_features", labelCol="y_res", predictionCol="final_pred", fitIntercept=True, maxIter=10, tol=1e-3, solver="normal")
         final_estimate = causal_model.fit(final_ml_data)
@@ -81,11 +98,11 @@ class CustomCode:
 
         # Outcome R-Squared 
         eval_y = RegressionEvaluator(labelCol="post_campaign_total_order_value", predictionCol="y_hat", metricName="r2")
-        r2_o = float(eval_y.evaluate(ml_data))
+        r2_o = float(eval_y.evaluate(ml_data_cv))
 
         # Treatment AUC
         eval_t = BinaryClassificationEvaluator(labelCol="treatment", rawPredictionCol="rawPrediction", metricName="areaUnderROC")
-        auc_t = float(eval_t.evaluate(ml_data))
+        auc_t = float(eval_t.evaluate(ml_data_cv))
 
         # Incremental Lift ----------------------------------------------------
         # Coefficient of t_res: For 1 unit of t_res, how much y_res change did we see?
@@ -100,7 +117,7 @@ class CustomCode:
         lift_ci_lower   = lift_value - 1.96 * lift_std_err
         lift_ci_upper   = lift_value + 1.96 * lift_std_err
 
-        stats = ml_data.agg(F.count("*").alias("total_count"),
+        stats = ml_data_cv.agg(F.count("*").alias("total_count"),
                             F.sum(F.col("treatment").cast(DoubleType())).alias("treated_count"),
                             # avg_treatment_spend only for Q1 — exposed AND converted
                             F.avg(F.when((F.col("treatment") == 1) & (F.col("post_campaign_total_order_value") > 0), \
@@ -128,7 +145,7 @@ class CustomCode:
         # The coefficient on each interaction IS the CATE slope for that modifier.
 
         # Bucket continuous modifiers into segments first (keeps interpretation clean)
-        ml_data_cate = ml_data.withColumn("seg_buyer", F.col("pre_campaign_has_conversion").cast(DoubleType()))\
+        ml_data_cate = ml_data_cv.withColumn("seg_buyer", F.col("pre_campaign_has_conversion").cast(DoubleType()))\
                               .withColumn("seg_lapsed", F.when(F.col("pre_campaign_conversion_recency") >= 30, F.lit(1.0)).otherwise(F.lit(0.0)))\
                               .withColumn("seg_young", F.when(F.col("age") <= 35, F.lit(1.0)).otherwise(F.lit(0.0)))\
                               .withColumn("seg_senior", F.when(F.col("age") >= 55, F.lit(1.0)).otherwise(F.lit(0.0)))\

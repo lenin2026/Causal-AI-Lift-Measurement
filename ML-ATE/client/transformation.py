@@ -55,9 +55,9 @@ class Transformation:
             '''
         """
 
-        mapped_exposure_df = self.data_handler.read("mapped_exposure")
+        stratified_features_df = self.data_handler.read("StratifiedFeatures")
 
-        result = CustomCode(self.custom_packages_path).custom_func(self.spark, mapped_exposure_df)
+        result = CustomCode(self.custom_packages_path).custom_func(self.spark, stratified_features_df)
         self.data_handler.write(result)
 
         ##### START OF SAMPLE CODE ######

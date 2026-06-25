@@ -107,6 +107,18 @@ python3 setup.py bdist_wheel
 ```
 The wheel file will be created and placed in the `dist/` directory.
 
+### Deploying to Google Cloud Storage (dev)
+
+Upload the built wheel to the shared GCS bucket:
+
+```bash
+gsutil cp dist/causal_ai_feature_engg-<version>-py3-none-any.whl \
+  gs://habu-client-org-e22e5112-cd94-42bf-a2b9-6f95b52115c6/
+```
+
+GCS bucket: `gs://habu-client-org-e22e5112-cd94-42bf-a2b9-6f95b52115c6/`
+GCP project: `habu-client`
+
 
 
 ## Testing

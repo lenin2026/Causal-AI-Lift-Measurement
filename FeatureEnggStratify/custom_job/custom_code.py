@@ -144,6 +144,19 @@ class CustomCode:
             q82a_handoff_required_columns + q82a_optional_columns,
         )
 
+        # Backward compatibility: map pre-1.3 q82A column names to current names.
+        # Applies only when the old name is present and the new name is absent,
+        # so it is safe to leave in place after AllFeatures is regenerated with the 1.3 wheel.
+        _legacy_renames = {
+            "baseline_12m_revenue":     "baseline_12m_revenue_sum",
+            "baseline_12m_quantity":    "baseline_12m_quantity_sum",
+            "baseline_12m_revenue_bin": "baseline_12m_revenue_sum_bin",
+        }
+        for _old, _new in _legacy_renames.items():
+            if _old in q82a_addresslink_features_with_assignment.columns and \
+               _new not in q82a_addresslink_features_with_assignment.columns:
+                q82a_addresslink_features_with_assignment = q82a_addresslink_features_with_assignment.withColumnRenamed(_old, _new)
+
         require_columns(
             q82a_addresslink_features_with_assignment,
             q82a_handoff_required_columns,

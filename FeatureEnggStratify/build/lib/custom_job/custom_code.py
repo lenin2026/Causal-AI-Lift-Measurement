@@ -21,34 +21,10 @@ class CustomCode:
         def require_columns(df: DataFrame, required_columns, df_name: str) -> None:
             missing_columns = [col_name for col_name in required_columns if col_name not in df.columns]
             if missing_columns:
-                available_columns = ", ".join(df.columns[:40])
-                raise ValueError(
-                    f"{df_name} missing required columns: {', '.join(missing_columns)}. "
-                    f"For q82A, conversion_df must be the q79A conversion_rows_mapped_to_addresslink output, "
-                    f"not raw conversion rows. Available columns: {available_columns}"
-                )
-
-        def canonicalize_columns(df: DataFrame, canonical_columns) -> DataFrame:
-            actual_by_lower = {col_name.lower(): col_name for col_name in df.columns}
-            for canonical_col in canonical_columns:
-                actual_col = actual_by_lower.get(canonical_col.lower())
-                if actual_col and actual_col != canonical_col and canonical_col not in df.columns:
-                    df = df.withColumnRenamed(actual_col, canonical_col)
-            return df
+                raise ValueError(f"{df_name} missing required columns: {', '.join(missing_columns)}")
 
         def optional_col(df: DataFrame, col_name: str, default_value):
             return F.col(col_name) if col_name in df.columns else default_value
-
-        def optional_flag_col(df: DataFrame, col_name: str, default_value: int = 0):
-            if col_name not in df.columns:
-                return F.lit(default_value).cast(IntegerType())
-            value_text = F.lower(F.trim(F.col(col_name).cast(StringType())))
-            return (
-                F.when(value_text.isin("1", "true", "t", "yes", "y"), F.lit(1))
-                .when(value_text.isin("0", "false", "f", "no", "n"), F.lit(0))
-                .otherwise(F.coalesce(F.col(col_name).cast(IntegerType()), F.lit(default_value)))
-                .cast(IntegerType())
-            )
 
         def count_distinct_optional(df: DataFrame, col_name: str, alias_name: str, condition=None):
             if col_name not in df.columns:
@@ -57,52 +33,6 @@ class CustomCode:
             if condition is not None:
                 value = F.when(condition, value)
             return F.countDistinct(value).cast(LongType()).alias(alias_name)
-
-        conversion_df = canonicalize_columns(
-            conversion_df,
-            [
-                grain_col,
-                "order_id",
-                "transaction_amount",
-                "quantity",
-                "is_campaign_product",
-                "transaction_date",
-                "transaction_timestamp_unix",
-                "banner",
-                "division",
-                "product_id",
-                "product_brand",
-                "transaction_category",
-            ],
-        )
-        exposure_df = canonicalize_columns(
-            exposure_df,
-            [
-                grain_col,
-                "treatment",
-                "is_eligible_control",
-                "has_partial_exposure_within_addresslink",
-                "min_exposure_ts",
-                "exposure_frequency_deduped",
-                "mapped_online_identity_count",
-                "exposed_online_identity_count",
-                "person_record_count",
-                "hhpel_count",
-            ],
-        )
-        demographic_df = canonicalize_columns(
-            demographic_df,
-            [
-                grain_col,
-                "rampid",
-                "install_date",
-                "gender",
-                "age",
-                "state",
-                "hh_income",
-                "poc",
-            ],
-        )
 
         require_columns(
             conversion_df,
@@ -124,7 +54,7 @@ class CustomCode:
                 demographic_df.withColumn(
                     "rn",
                     F.row_number().over(
-                        Window.partitionBy("rampid").orderBy(F.desc_nulls_last(F.col("install_date")))
+                        Window.partitionBy("rampid").orderBy(F.desc_nulls_last("install_date"))
                     ),
                 )
                 .filter(F.col("rn") == 1)
@@ -135,7 +65,7 @@ class CustomCode:
                 demographic_df.withColumn(
                     "rn",
                     F.row_number().over(
-                        Window.partitionBy(grain_col).orderBy(F.desc_nulls_last(F.col("install_date")))
+                        Window.partitionBy(grain_col).orderBy(F.desc_nulls_last("install_date"))
                     ),
                 )
                 .filter(F.col("rn") == 1)
@@ -339,7 +269,6 @@ class CustomCode:
             F.to_date(F.lit("2025-11-12")), F.to_date(F.lit("2026-01-06"))
         )
         campaign_product_w = F.col("is_campaign_product") == 1
-        positive_amount_w = F.col("transaction_amount") > 0
 
         features_df = (
             conversion_df.groupBy(grain_col)
@@ -347,18 +276,18 @@ class CustomCode:
                 F.countDistinct(F.when(baseline_12m_w, F.col("order_id")))
                 .cast(LongType())
                 .alias("baseline_12m_orders"),
-                F.sum(
-                    F.when(baseline_12m_w & positive_amount_w, F.col("transaction_amount")).otherwise(F.lit(0.0))
-                ).alias("baseline_12m_revenue_sum"),
+                F.sum(F.when(baseline_12m_w, F.col("transaction_amount")).otherwise(F.lit(0.0))).alias(
+                    "baseline_12m_revenue"
+                ),
                 F.sum(F.when(baseline_12m_w, F.col("quantity")).otherwise(F.lit(0.0))).alias(
-                    "baseline_12m_quantity_sum"
+                    "baseline_12m_quantity"
                 ),
                 F.countDistinct(F.when(baseline_60d_w, F.col("order_id")))
                 .cast(LongType())
                 .alias("baseline_60d_orders"),
-                F.sum(
-                    F.when(baseline_60d_w & positive_amount_w, F.col("transaction_amount")).otherwise(F.lit(0.0))
-                ).alias("baseline_60d_revenue"),
+                F.sum(F.when(baseline_60d_w, F.col("transaction_amount")).otherwise(F.lit(0.0))).alias(
+                    "baseline_60d_revenue"
+                ),
                 F.sum(F.when(baseline_60d_w, F.col("quantity")).otherwise(F.lit(0.0))).alias(
                     "baseline_60d_quantity"
                 ),
@@ -366,10 +295,7 @@ class CustomCode:
                 .cast(LongType())
                 .alias("baseline_campaign_product_orders"),
                 F.sum(
-                    F.when(
-                        baseline_12m_w & campaign_product_w & positive_amount_w,
-                        F.col("transaction_amount"),
-                    ).otherwise(F.lit(0.0))
+                    F.when(baseline_12m_w & campaign_product_w, F.col("transaction_amount")).otherwise(F.lit(0.0))
                 ).alias("baseline_campaign_product_revenue"),
                 F.sum(F.when(baseline_12m_w & campaign_product_w, F.col("quantity")).otherwise(F.lit(0.0))).alias(
                     "baseline_campaign_product_quantity"
@@ -395,10 +321,7 @@ class CustomCode:
                 .cast(LongType())
                 .alias("outcome_campaign_product_orders"),
                 F.sum(
-                    F.when(
-                        outcome_campaign_w & campaign_product_w & positive_amount_w,
-                        F.col("transaction_amount"),
-                    ).otherwise(F.lit(0.0))
+                    F.when(outcome_campaign_w & campaign_product_w, F.col("transaction_amount")).otherwise(F.lit(0.0))
                 ).alias("outcome_campaign_product_revenue"),
                 F.sum(F.when(outcome_campaign_w & campaign_product_w, F.col("quantity")).otherwise(F.lit(0.0))).alias(
                     "outcome_campaign_product_quantity"
@@ -408,7 +331,7 @@ class CustomCode:
                 "days_since_last_baseline_purchase",
                 F.coalesce(
                     F.datediff(F.to_date(F.lit("2025-11-11")), F.col("last_baseline_purchase_date")),
-                    F.lit(366),
+                    F.lit(999),
                 ),
             )
             .withColumn(
@@ -416,22 +339,18 @@ class CustomCode:
                 F.coalesce(F.datediff(F.col("last_baseline_purchase_date"), F.col("first_baseline_purchase_date")), F.lit(0)),
             )
             .withColumn(
-                "has_baseline_purchase",
-                F.when(F.col("last_baseline_purchase_date").isNotNull(), F.lit(1)).otherwise(F.lit(0)).cast(IntegerType()),
-            )
-            .withColumn(
                 "baseline_12m_avg_order_value",
-                F.when(F.col("baseline_12m_orders") > 0, F.col("baseline_12m_revenue_sum") / F.col("baseline_12m_orders"))
+                F.when(F.col("baseline_12m_orders") > 0, F.col("baseline_12m_revenue") / F.col("baseline_12m_orders"))
                 .otherwise(F.lit(0.0)),
             )
             .withColumn(
                 "baseline_12m_avg_items_per_order",
-                F.when(F.col("baseline_12m_orders") > 0, F.col("baseline_12m_quantity_sum") / F.col("baseline_12m_orders"))
+                F.when(F.col("baseline_12m_orders") > 0, F.col("baseline_12m_quantity") / F.col("baseline_12m_orders"))
                 .otherwise(F.lit(0.0)),
             )
             .withColumn(
                 "recent_60d_revenue_share",
-                F.when(F.col("baseline_12m_revenue_sum") > 0, F.col("baseline_60d_revenue") / F.col("baseline_12m_revenue_sum"))
+                F.when(F.col("baseline_12m_revenue") > 0, F.col("baseline_60d_revenue") / F.col("baseline_12m_revenue"))
                 .otherwise(F.lit(0.0)),
             )
             .withColumn(
@@ -442,8 +361,8 @@ class CustomCode:
             .withColumn(
                 "campaign_product_revenue_share",
                 F.when(
-                    F.col("baseline_12m_revenue_sum") > 0,
-                    F.col("baseline_campaign_product_revenue") / F.col("baseline_12m_revenue_sum"),
+                    F.col("baseline_12m_revenue") > 0,
+                    F.col("baseline_campaign_product_revenue") / F.col("baseline_12m_revenue"),
                 ).otherwise(F.lit(0.0)),
             )
             .withColumn(
@@ -458,15 +377,12 @@ class CustomCode:
                 ),
             )
             .withColumn(
-                "baseline_12m_revenue_sum_bin",
-                F.when(F.col("baseline_12m_revenue_sum") == 0, F.lit("zero"))
-                .when(F.col("baseline_12m_revenue_sum") < 10, F.lit("lt_10"))
-                .when(F.col("baseline_12m_revenue_sum") < 50, F.lit("10_to_49"))
-                .when(F.col("baseline_12m_revenue_sum") < 100, F.lit("50_to_99"))
-                .when(F.col("baseline_12m_revenue_sum") < 250, F.lit("100_to_249"))
-                .when(F.col("baseline_12m_revenue_sum") < 500, F.lit("250_to_499"))
-                .when(F.col("baseline_12m_revenue_sum") < 1000, F.lit("500_to_999"))
-                .otherwise(F.lit("1000_plus")),
+                "baseline_12m_revenue_bin",
+                F.when(F.col("baseline_12m_revenue") == 0, F.lit("zero"))
+                .when(F.col("baseline_12m_revenue") < 10, F.lit("lt_10"))
+                .when(F.col("baseline_12m_revenue") < 50, F.lit("10_to_49"))
+                .when(F.col("baseline_12m_revenue") < 100, F.lit("50_to_99"))
+                .otherwise(F.lit("100_plus")),
             )
             .withColumn(
                 "campaign_product_affinity_label",
@@ -492,9 +408,9 @@ class CustomCode:
             F.col(grain_col),
             F.col("treatment").cast(IntegerType()).alias("treatment"),
             F.col("is_eligible_control").cast(IntegerType()).alias("is_eligible_control"),
-            optional_flag_col(exposure_df, "has_partial_exposure_within_addresslink").alias(
-                "has_partial_exposure_within_addresslink"
-            ),
+            optional_col(exposure_df, "has_partial_exposure_within_addresslink", F.lit(0))
+            .cast(IntegerType())
+            .alias("has_partial_exposure_within_addresslink"),
             optional_col(exposure_df, "min_exposure_ts", F.lit(None).cast(LongType()))
             .cast(LongType())
             .alias("min_exposure_ts"),
@@ -566,7 +482,6 @@ class CustomCode:
             "baseline_12m_active_purchase_days",
             "num_weeks_purchased_in_last_365_days",
             "baseline_purchase_tenure_days",
-            "has_baseline_purchase",
             "prior_campaign_product_buyer",
             "recent_60d_buyer",
             "lapsed_60d_buyer",
@@ -574,8 +489,8 @@ class CustomCode:
             "outcome_campaign_product_buyer",
         ]
         double_fill_columns = [
-            "baseline_12m_revenue_sum",
-            "baseline_12m_quantity_sum",
+            "baseline_12m_revenue",
+            "baseline_12m_quantity",
             "baseline_60d_revenue",
             "baseline_60d_quantity",
             "baseline_campaign_product_revenue",
@@ -593,7 +508,7 @@ class CustomCode:
             "hh_income_code_profile_label",
             "state_label",
             "age_bucket_profile_label",
-            "baseline_12m_revenue_sum_bin",
+            "baseline_12m_revenue_bin",
             "campaign_product_affinity_label",
             "baseline_buyer_label",
         ]
@@ -606,16 +521,14 @@ class CustomCode:
             final_df = final_df.withColumn(col_name, F.coalesce(F.col(col_name), F.lit("missing")).cast(StringType()))
         final_df = final_df.withColumn(
             "days_since_last_baseline_purchase",
-            F.coalesce(F.col("days_since_last_baseline_purchase"), F.lit(366)).cast(LongType()),
+            F.coalesce(F.col("days_since_last_baseline_purchase"), F.lit(999)).cast(LongType()),
         )
 
         output_cols = [
             F.col(grain_col).cast(StringType()).alias("addressLink"),
-            F.col("treatment").cast(IntegerType()).alias("treatment"),
-            F.col("is_eligible_control").cast(IntegerType()).alias("is_eligible_control"),
-            F.col("has_partial_exposure_within_addresslink")
-            .cast(IntegerType())
-            .alias("has_partial_exposure_within_addresslink"),
+            F.col("treatment").cast(IntegerType()),
+            F.col("is_eligible_control").cast(IntegerType()),
+            F.col("has_partial_exposure_within_addresslink").cast(IntegerType()),
             F.col("min_exposure_ts").cast(LongType()),
             F.col("exposure_frequency_deduped").cast(LongType()),
             F.col("mapped_online_identity_count").cast(LongType()),
@@ -645,8 +558,8 @@ class CustomCode:
             F.col("age_75_84_count").cast(LongType()),
             F.col("age_85_plus_count").cast(LongType()),
             F.col("baseline_12m_orders").cast(LongType()),
-            F.col("baseline_12m_revenue_sum").cast(DoubleType()),
-            F.col("baseline_12m_quantity_sum").cast(DoubleType()),
+            F.col("baseline_12m_revenue").cast(DoubleType()),
+            F.col("baseline_12m_quantity").cast(DoubleType()),
             F.col("baseline_60d_orders").cast(LongType()),
             F.col("baseline_60d_revenue").cast(DoubleType()),
             F.col("baseline_60d_quantity").cast(DoubleType()),
@@ -658,7 +571,6 @@ class CustomCode:
             F.col("baseline_12m_distinct_divisions").cast(LongType()),
             F.col("baseline_12m_active_purchase_days").cast(LongType()),
             F.col("num_weeks_purchased_in_last_365_days").cast(LongType()),
-            F.col("has_baseline_purchase").cast(IntegerType()),
             F.col("days_since_last_baseline_purchase").cast(LongType()),
             F.col("baseline_purchase_tenure_days").cast(LongType()),
             F.col("baseline_12m_avg_order_value").cast(DoubleType()),
@@ -669,7 +581,7 @@ class CustomCode:
             F.col("prior_campaign_product_buyer").cast(IntegerType()),
             F.col("recent_60d_buyer").cast(IntegerType()),
             F.col("lapsed_60d_buyer").cast(IntegerType()),
-            F.col("baseline_12m_revenue_sum_bin").cast(StringType()),
+            F.col("baseline_12m_revenue_bin").cast(StringType()),
             F.col("campaign_product_affinity_label").cast(StringType()),
             F.col("baseline_buyer_label").cast(StringType()),
             F.col("outcome_campaign_product_orders").cast(LongType()),

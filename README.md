@@ -9,17 +9,20 @@ lift estimate with confidence intervals and segment-level CATE breakdowns.
 ## Primary Pipeline (PSM + Double-ML)
 
 ```
-FeatureEngg (q82A)
-  └─ AllFeatures
-       └─► ML-PSM  ──────────► PSMMatchedFeatures
-                                    └─► ML-ATE  ──► lift estimate (summary row)
+q79A (Conversion Preprocessing)  ──┐
+                                    ├──► FeatureEngg (q82A)
+q80A (Exposure Preprocessing)  ────┘         └─ AllFeatures
+                                                   └─► ML-PSM  ──────────► PSMMatchedFeatures
+                                                                                └─► ML-ATE  ──► lift estimate (summary row)
 ```
 
 **This is the primary pipeline for testing and production.**
 
 | Step | Module | Input macro | Output macro | Purpose |
 |---|---|---|---|---|
-| q82A | `FeatureEngg` | raw exposure + transaction data | `AllFeatures` | Feature engineering — one row per addressLink |
+| q79A | `PreProcessing` | `@conversion`, `@mapping`, `@demographics`, `@campaign` | `raw_conversion` | Map conversion events to addressLink; flag campaign products |
+| q80A | `PreProcessing` | `@exposure`, `@mapping`, `@demographics` | `raw_exposure` | Aggregate exposures to addressLink; assign treatment flag |
+| q82A | `FeatureEngg` | `raw_conversion`, `raw_exposure`, `sample_insights` | `AllFeatures` | Feature engineering — one row per addressLink |
 | q85A | `ML-PSM` | `AllFeatures` | `PSMMatchedFeatures` | Propensity Score Matching — treated + matched controls |
 | q86A | `ML-ATE` | `PSMMatchedFeatures` | lift summary row | Double-ML ATE / CATE estimation |
 
@@ -28,10 +31,11 @@ FeatureEngg (q82A)
 ## Alternative Pipeline (Exact-Stratum Matching + Double-ML)
 
 ```
-FeatureEngg (q82A)
-  └─ AllFeatures
-       └─► FeatureEnggStratify (q84B)  ──► StratifiedFeatures
-                                               └─► ML-ATE  ──► lift estimate
+q79A (Conversion Preprocessing)  ──┐
+                                    ├──► FeatureEngg (q82A)
+q80A (Exposure Preprocessing)  ────┘         └─ AllFeatures
+                                                   └─► FeatureEnggStratify (q84B)  ──► StratifiedFeatures
+                                                                                            └─► ML-ATE  ──► lift estimate
 ```
 
 This pipeline uses exact-stratum 1:1 matching (poc_label × state_label × baseline_buyer_label ×
@@ -45,13 +49,58 @@ estimand; running both provides triangulation.
 
 ## Module Reference
 
+### PreProcessing
+
+**Path:** `PreProcessing-PySpark-SQL-Queries/`
+
+PySpark SQL queries that transform raw source tables into intermediate tables consumed by
+FeatureEngg. No Python wheel — these run as SQL steps in Habu Clean Compute before q82A.
+
+#### q79A — Conversion Preprocessing
+
+**File:** `q79A_Conversion_Preprocessing.sql`
+**Inputs:** `@conversion`, `@mapping`, `@demographics`, `@campaign`
+**Output macro:** `raw_conversion`
+
+Joins conversion events (`@conversion.lr_id`) through the identity graph (`@mapping` →
+`@demographics`) to resolve each transaction to an `addressLink`. Deduplicates identity mappings
+and demographic records by `install_date DESC`. Filters to the campaign window
+(2024-11-12 – 2026-01-06) and deduplicates transactions by `(lr_id, order_id, timestamp,
+product_id)`. Left-joins campaign product IDs to produce the `is_campaign_product` flag.
+
+Key output columns: `addressLink`, `order_id`, `product_id`, `transaction_amount`, `quantity`,
+`transaction_timestamp_unix`, `transaction_date`, `banner`, `division`, `transaction_category`,
+`is_campaign_product`
+
+#### q80A — Exposure Preprocessing
+
+**File:** `q80A_Exposure_Preprocessing.sql`
+**Inputs:** `@exposure`, `@mapping`, `@demographics`
+**Output macro:** `raw_exposure`
+
+Resolves Meta impression events (`@exposure.tp_id`) to `addressLink` via the identity graph.
+Deduplicates exposures by `(tp_id, ts, campaign_id, ad_id, adset_id, account_id, event_type,
+placement_type, device_platform, impression_device)`. Aggregates to the `addressLink` grain:
+sets `treatment = 1` if any mapped online identity was exposed, computes exposure counts and
+cardinality diagnostics, and flags `has_partial_exposure_within_addresslink` for households
+with mixed exposed/unexposed identities.
+
+Key output columns: `addressLink`, `treatment`, `is_eligible_control`, `min_exposure_ts`,
+`exposure_frequency_deduped`, `mapped_online_identity_count`, `exposed_online_identity_count`,
+`person_record_count`, `hhpel_count`, `has_partial_exposure_within_addresslink`
+
+---
+
 ### FeatureEngg
 
 **Path:** `FeatureEngg/`
 **Wheel:** `causal_ai_feature_engg-<version>-py3-none-any.whl`
 
-Computes all features from raw inputs. One row per `addressLink`. Outputs the `AllFeatures` table
-consumed by both ML-PSM and FeatureEnggStratify.
+Computes all features from preprocessed inputs. One row per `addressLink`. Outputs the
+`AllFeatures` table consumed by both ML-PSM and FeatureEnggStratify.
+
+**Input macros:** `raw_conversion` (q79A output), `raw_exposure` (q80A output), `sample_insights`
+(demographics, read directly without preprocessing)
 
 Key outputs:
 

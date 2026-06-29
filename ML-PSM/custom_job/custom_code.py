@@ -1,12 +1,10 @@
-import math
-
 import pyspark.sql.functions as F
 from pyspark.ml.classification import LogisticRegression
 from pyspark.ml.evaluation import BinaryClassificationEvaluator
 from pyspark.ml.feature import StringIndexer, VectorAssembler
 from pyspark.ml.functions import vector_to_array
 from pyspark.sql import DataFrame, SparkSession
-from pyspark.sql.types import DoubleType, IntegerType, StringType
+from pyspark.sql.types import DoubleType, IntegerType, LongType, StringType
 from pyspark.sql.window import Window
 
 
@@ -24,10 +22,13 @@ class CustomCode:
         """Propensity Score Matching — returns matched individual rows for ML-ATE.
 
         Consumes q82A AllFeatures (full pre-matched universe).
-        Outputs one row per addressLink for treated + PSM-matched controls,
-        retaining all original AllFeatures columns plus propensity_score and treatment_group.
-        This output is the PSMMatchedFeatures table consumed by ML-ATE.
+        Outputs PSMMatchedFeatures: one row per addressLink for treated +
+        PSM-matched controls, with all AllFeatures columns plus propensity_score
+        and treatment_group.
         """
+
+        def optional_col(df: DataFrame, col_name: str, default_value):
+            return F.col(col_name) if col_name in df.columns else default_value
 
         # Backward compat: pre-1.3 q82A may use old column names
         _legacy_renames = {
@@ -38,9 +39,6 @@ class CustomCode:
         for _old, _new in _legacy_renames.items():
             if _old in all_features_df.columns and _new not in all_features_df.columns:
                 all_features_df = all_features_df.withColumnRenamed(_old, _new)
-
-        # Capture passthrough column list before any derived columns are added
-        _passthrough_cols = list(all_features_df.columns)
 
         grain_col   = "addressLink"
         partial_col = "has_partial_exposure_within_addresslink"
@@ -59,7 +57,7 @@ class CustomCode:
             )
         )
 
-        # ── Step 2: Ensure optional columns exist before encoding / assembly ────
+        # ── Step 2: Ensure optional string columns exist before StringIndexer ───
         for col_name, default in [
             ("poc_label",                      "missing"),
             ("state_label",                    "missing"),
@@ -74,6 +72,7 @@ class CustomCode:
                     F.coalesce(F.col(col_name).cast(StringType()), F.lit(default)),
                 )
 
+        # Numeric columns required by VectorAssembler — fill with 0 if absent
         numeric_feature_cols = [
             "baseline_12m_orders",
             "baseline_12m_revenue_sum",
@@ -219,20 +218,98 @@ class CustomCode:
             .filter(F.col("control_rank") <= F.col("treated_in_bucket"))
         )
 
-        # ── Output: matched individual rows for ML-ATE ───────────────────────────
-        # Retain all original AllFeatures columns + propensity_score + treatment_group.
-        # ML-ATE reads this as PSMMatchedFeatures and uses treatment, outcome, and
-        # pre-campaign feature columns directly — no schema changes required in ML-ATE.
-        treated_output = (
-            treated_scored
-            .withColumn("treatment_group", F.lit("treatment"))
-            .select(*_passthrough_cols, "propensity_score", "treatment_group")
-        )
+        # ── Output: PSMMatchedFeatures ────────────────────────────────────────────
+        # Explicit output_cols list mirrors FeatureEngg and FeatureEnggStratify style:
+        # every column is named, typed, and ordered. optional_col handles columns
+        # absent in older q82A versions. propensity_score and treatment_group are
+        # PSM-specific additions consumed by ML-ATE.
 
-        control_output = (
-            matched_control
-            .withColumn("treatment_group", F.lit("matched_control"))
-            .select(*_passthrough_cols, "propensity_score", "treatment_group")
-        )
+        def opt(col_name, default_value):
+            return optional_col(scored, col_name, default_value)
 
-        return treated_output.unionByName(control_output)
+        output_cols = [
+            F.col("addressLink").cast(StringType()),
+            F.col("treatment").cast(IntegerType()),
+            F.col("is_eligible_control").cast(IntegerType()),
+            F.col("has_partial_exposure_within_addresslink").cast(IntegerType()),
+            F.col("min_exposure_ts").cast(LongType()),
+            F.col("exposure_frequency_deduped").cast(LongType()),
+            F.col("mapped_online_identity_count").cast(LongType()),
+            F.col("exposed_online_identity_count").cast(LongType()),
+            F.col("hhpel_count").cast(LongType()),
+            F.col("person_record_count").cast(LongType()),
+            F.col("online_identity_count").cast(LongType()),
+            F.col("poc_label").cast(StringType()),
+            opt("hh_income_code_profile_label", F.lit("missing")).cast(StringType()).alias("hh_income_code_profile_label"),
+            opt("num_hh_income_missing_in_addresslink", F.lit(0)).cast(LongType()).alias("num_hh_income_missing_in_addresslink"),
+            opt("num_hh_income_zero_or_negative_in_addresslink", F.lit(0)).cast(LongType()).alias("num_hh_income_zero_or_negative_in_addresslink"),
+            *[
+                opt(f"num_hh_income_code_{i}_in_addresslink", F.lit(0)).cast(LongType()).alias(f"num_hh_income_code_{i}_in_addresslink")
+                for i in range(1, 36)
+            ],
+            opt("num_hh_income_code_other_in_addresslink", F.lit(0)).cast(LongType()).alias("num_hh_income_code_other_in_addresslink"),
+            F.col("state_label").cast(StringType()),
+            opt("num_male_in_addresslink", F.lit(0)).cast(LongType()).alias("num_male_in_addresslink"),
+            opt("num_female_in_addresslink", F.lit(0)).cast(LongType()).alias("num_female_in_addresslink"),
+            opt("num_unknown_or_other_gender_in_addresslink", F.lit(0)).cast(LongType()).alias("num_unknown_or_other_gender_in_addresslink"),
+            opt("age_bucket_profile_label", F.lit("missing")).cast(StringType()).alias("age_bucket_profile_label"),
+            opt("age_missing_count", F.lit(0)).cast(LongType()).alias("age_missing_count"),
+            opt("age_lt_18_count", F.lit(0)).cast(LongType()).alias("age_lt_18_count"),
+            opt("age_18_24_count", F.lit(0)).cast(LongType()).alias("age_18_24_count"),
+            opt("age_25_34_count", F.lit(0)).cast(LongType()).alias("age_25_34_count"),
+            opt("age_35_44_count", F.lit(0)).cast(LongType()).alias("age_35_44_count"),
+            opt("age_45_54_count", F.lit(0)).cast(LongType()).alias("age_45_54_count"),
+            opt("age_55_64_count", F.lit(0)).cast(LongType()).alias("age_55_64_count"),
+            opt("age_65_74_count", F.lit(0)).cast(LongType()).alias("age_65_74_count"),
+            opt("age_75_84_count", F.lit(0)).cast(LongType()).alias("age_75_84_count"),
+            opt("age_85_plus_count", F.lit(0)).cast(LongType()).alias("age_85_plus_count"),
+            F.col("baseline_12m_orders").cast(LongType()),
+            F.col("baseline_12m_revenue_sum").cast(DoubleType()),
+            F.col("baseline_12m_quantity_sum").cast(DoubleType()),
+            opt("baseline_60d_orders", F.lit(0)).cast(LongType()).alias("baseline_60d_orders"),
+            opt("baseline_60d_revenue", F.lit(0.0)).cast(DoubleType()).alias("baseline_60d_revenue"),
+            opt("baseline_60d_quantity", F.lit(0.0)).cast(DoubleType()).alias("baseline_60d_quantity"),
+            opt("baseline_campaign_product_orders", F.lit(0)).cast(LongType()).alias("baseline_campaign_product_orders"),
+            opt("baseline_campaign_product_revenue", F.lit(0.0)).cast(DoubleType()).alias("baseline_campaign_product_revenue"),
+            opt("baseline_campaign_product_quantity", F.lit(0.0)).cast(DoubleType()).alias("baseline_campaign_product_quantity"),
+            opt("baseline_12m_negative_transaction_count", F.lit(0)).cast(LongType()).alias("baseline_12m_negative_transaction_count"),
+            opt("baseline_12m_distinct_banners", F.lit(0)).cast(LongType()).alias("baseline_12m_distinct_banners"),
+            opt("baseline_12m_distinct_divisions", F.lit(0)).cast(LongType()).alias("baseline_12m_distinct_divisions"),
+            opt("baseline_12m_active_purchase_days", F.lit(0)).cast(LongType()).alias("baseline_12m_active_purchase_days"),
+            opt("num_weeks_purchased_in_last_365_days", F.lit(0)).cast(LongType()).alias("num_weeks_purchased_in_last_365_days"),
+            opt("has_baseline_purchase", F.lit(0)).cast(IntegerType()).alias("has_baseline_purchase"),
+            opt("days_since_last_baseline_purchase", F.lit(366)).cast(LongType()).alias("days_since_last_baseline_purchase"),
+            opt("baseline_purchase_tenure_days", F.lit(0)).cast(LongType()).alias("baseline_purchase_tenure_days"),
+            opt("baseline_12m_avg_order_value", F.lit(0.0)).cast(DoubleType()).alias("baseline_12m_avg_order_value"),
+            opt("baseline_12m_avg_items_per_order", F.lit(0.0)).cast(DoubleType()).alias("baseline_12m_avg_items_per_order"),
+            opt("recent_60d_revenue_share", F.lit(0.0)).cast(DoubleType()).alias("recent_60d_revenue_share"),
+            opt("recent_60d_order_share", F.lit(0.0)).cast(DoubleType()).alias("recent_60d_order_share"),
+            opt("campaign_product_revenue_share", F.lit(0.0)).cast(DoubleType()).alias("campaign_product_revenue_share"),
+            opt("prior_campaign_product_buyer", F.lit(0)).cast(IntegerType()).alias("prior_campaign_product_buyer"),
+            opt("recent_60d_buyer", F.lit(0)).cast(IntegerType()).alias("recent_60d_buyer"),
+            opt("lapsed_60d_buyer", F.lit(0)).cast(IntegerType()).alias("lapsed_60d_buyer"),
+            F.col("baseline_12m_revenue_sum_bin").cast(StringType()),
+            opt("campaign_product_affinity_label", F.lit("missing")).cast(StringType()).alias("campaign_product_affinity_label"),
+            F.col("baseline_buyer_label").cast(StringType()),
+            F.col("outcome_campaign_product_orders").cast(LongType()),
+            F.col("outcome_campaign_product_revenue").cast(DoubleType()),
+            F.col("outcome_campaign_product_quantity").cast(DoubleType()),
+            F.col("outcome_campaign_product_buyer").cast(IntegerType()),
+            # PSM-specific columns — not in AllFeatures; added here for ML-ATE diagnostics
+            F.col("propensity_score").cast(DoubleType()),
+            F.col("treatment_group").cast(StringType()),
+        ]
+
+        treated_output  = treated_scored.withColumn("treatment_group", F.lit("treatment"))
+        control_output  = matched_control.withColumn("treatment_group", F.lit("matched_control"))
+
+        return (
+            treated_output.select(*output_cols)
+            .unionByName(control_output.select(*output_cols))
+            .orderBy(
+                F.desc("treatment"),
+                F.col("treatment_group"),
+                F.col("propensity_score").desc(),
+                F.col("addressLink"),
+            )
+        )

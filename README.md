@@ -214,12 +214,34 @@ and Conditional Average Treatment Effect (CATE) estimation.
 
 **Output columns (24):**
 
-`incremental_lift`, `lift_percent`, `avg_treatment_amount`, `expected_amount`,
-`total_row_count`, `treated_count`, `outcome_r2`, `treatment_auc`,
-`lift_pct_ci_lower`, `lift_pct_ci_upper`, `lift_ci_lower`, `lift_ci_upper`, `lift_p_value`,
-`ate_base`, `cate_existing_buyer`, `cate_lapsed`, `cate_young`, `cate_senior`, `cate_high_income`,
-`cate_existing_buyer_p_value`, `cate_lapsed_p_value`, `cate_young_p_value`,
-`cate_senior_p_value`, `cate_high_income_p_value`
+| # | Column | Spark Type | Source |
+|---|---|---|---|
+| 1 | `incremental_lift` | `DOUBLE` | `float(final_estimate.coefficients[0])` |
+| 2 | `lift_percent` | `DOUBLE` | `float / float * 100` |
+| 3 | `avg_treatment_amount` | `DOUBLE` | `F.avg(...)` — collected as Python `float` |
+| 4 | `expected_amount` | `DOUBLE` | `float - float` |
+| 5 | `total_row_count` | `LONG` | `F.count("*")` — collected as Python `int` |
+| 6 | `treated_count` | `DOUBLE` | `F.sum(col.cast(DoubleType()))` — collected as Python `float` |
+| 7 | `outcome_r2` | `DOUBLE` | `float(eval_y.evaluate(...))` |
+| 8 | `treatment_auc` | `DOUBLE` | `float(eval_t.evaluate(...))` |
+| 9 | `lift_pct_ci_lower` | `DOUBLE` | `float / float * 100` |
+| 10 | `lift_pct_ci_upper` | `DOUBLE` | `float / float * 100` |
+| 11 | `lift_ci_lower` | `DOUBLE` | `float - 1.96 * float` |
+| 12 | `lift_ci_upper` | `DOUBLE` | `float + 1.96 * float` |
+| 13 | `lift_p_value` | `DOUBLE` | `float(causal_summary.pValues[0])` |
+| 14 | `ate_base` | `DOUBLE` | `float(coefs[0])` |
+| 15 | `cate_existing_buyer` | `DOUBLE` | `float + float` |
+| 16 | `cate_lapsed` | `DOUBLE` | `float + float` |
+| 17 | `cate_young` | `DOUBLE` | `float + float` |
+| 18 | `cate_senior` | `DOUBLE` | `float + float` |
+| 19 | `cate_high_income` | `DOUBLE` | `float + float` |
+| 20 | `cate_existing_buyer_p_value` | `DOUBLE` | `float(cate_summary.pValues[1])` or `-1.0` |
+| 21 | `cate_lapsed_p_value` | `DOUBLE` | `float(cate_summary.pValues[2])` or `-1.0` |
+| 22 | `cate_young_p_value` | `DOUBLE` | `float(cate_summary.pValues[3])` or `-1.0` |
+| 23 | `cate_senior_p_value` | `DOUBLE` | `float(cate_summary.pValues[4])` or `-1.0` |
+| 24 | `cate_high_income_p_value` | `DOUBLE` | `float(cate_summary.pValues[5])` or `-1.0` |
+
+23 of 24 columns are `DOUBLE`. `total_row_count` is the only `LONG` — from `F.count("*")` which collects as a Python `int`.
 
 **Switching between pipelines:**
 

@@ -1,3 +1,0 @@
-client
-custom_job
-version

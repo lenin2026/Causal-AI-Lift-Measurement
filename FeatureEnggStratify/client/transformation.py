@@ -55,9 +55,12 @@ class Transformation:
             '''
         """
 
-        psm_matched_features_df = self.data_handler.read("PSMMatchedFeatures")
+        all_features_df = self.data_handler.read("AllFeatures")
 
-        result = CustomCode(self.custom_packages_path).custom_func(self.spark, psm_matched_features_df)
+        result = CustomCode(self.custom_packages_path).custom_func(
+            self.spark,
+            all_features_df,
+        )
         self.data_handler.write(result)
 
         ##### START OF SAMPLE CODE ######

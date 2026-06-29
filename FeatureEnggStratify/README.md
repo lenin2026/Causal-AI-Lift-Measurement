@@ -112,7 +112,7 @@ The wheel file will be created and placed in the `dist/` directory.
 Upload the built wheel to the shared GCS bucket:
 
 ```bash
-gsutil cp dist/causal_ai_feature_engg-<version>-py3-none-any.whl \
+gsutil cp dist/causal_ai_feature_engg_stratification-<version>-py3-none-any.whl \
   gs://habu-client-org-e22e5112-cd94-42bf-a2b9-6f95b52115c6/
 ```
 

@@ -55,9 +55,9 @@ class Transformation:
             '''
         """
 
-        stratified_features_df = self.data_handler.read("StratifiedFeatures")
+        psm_matched_features_df = self.data_handler.read("PSMMatchedFeatures")
 
-        result = CustomCode(self.custom_packages_path).custom_func(self.spark, stratified_features_df)
+        result = CustomCode(self.custom_packages_path).custom_func(self.spark, psm_matched_features_df)
         self.data_handler.write(result)
 
         ##### START OF SAMPLE CODE ######

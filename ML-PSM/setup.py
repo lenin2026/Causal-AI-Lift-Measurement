@@ -12,7 +12,7 @@ with open("README.md", "r", encoding="utf-8") as readme:
     long_description = readme.read()
 
 setup(
-    name="causal-ai-feature-engg-stratification",
+    name="causal-ai-psm",
     version=version.__version__,
     description=version.__description__,
     install_requires=fixed_requirements,

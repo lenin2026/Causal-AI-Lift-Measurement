@@ -27,6 +27,14 @@ class CustomCode:
         and treatment_group.
         """
 
+        # Habu platform may deliver AllFeatures with some columns uppercased
+        # (observed: TREATMENT, ADDRESSLINK, IS_ELIGIBLE_CONTROL,
+        # HAS_PARTIAL_EXPOSURE_WITHIN_ADDRESSLINK). Normalize to lowercase first,
+        # then restore addressLink camelCase so grain_col references are consistent.
+        all_features_df = all_features_df.toDF(*[c.lower() for c in all_features_df.columns])
+        if "addresslink" in all_features_df.columns and "addressLink" not in all_features_df.columns:
+            all_features_df = all_features_df.withColumnRenamed("addresslink", "addressLink")
+
         def optional_col(df: DataFrame, col_name: str, default_value):
             return F.col(col_name) if col_name in df.columns else default_value
 

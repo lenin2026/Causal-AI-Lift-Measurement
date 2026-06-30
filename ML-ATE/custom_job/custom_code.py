@@ -227,6 +227,21 @@ class CustomCode:
         # days_since_last_baseline_purchase → recently active vs. lapsed (>= 30 days = lapsed)
         # est_age → young (<= 35) vs. senior (>= 55) segments
         # est_income_code >= 20 → above-median income (codes 1–35, higher = higher income)
+
+        # PSMMatchedFeatures produced by ML-PSM wheels prior to the explicit
+        # output_cols refactor may not carry has_baseline_purchase. Derive it
+        # from days_since_last_baseline_purchase (always present — it is an
+        # assembler input, so a missing value would have been caught above).
+        # FeatureEngg sets days_since_last_baseline_purchase = 366 for non-buyers,
+        # so the inverse is: any value < 366 means at least one baseline purchase.
+        if "has_baseline_purchase" not in ml_data_cv.columns:
+            ml_data_cv = ml_data_cv.withColumn(
+                "has_baseline_purchase",
+                F.when(F.col("days_since_last_baseline_purchase") < 366, F.lit(1))
+                 .otherwise(F.lit(0))
+                 .cast(IntegerType()),
+            )
+
         ml_data_cate = (
             ml_data_cv
             .withColumn("seg_buyer",       F.col("has_baseline_purchase").cast(DoubleType()))

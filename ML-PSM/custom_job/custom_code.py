@@ -27,10 +27,31 @@ class CustomCode:
         and treatment_group.
         """
 
-        # Habu platform may deliver AllFeatures with some columns uppercased
-        # (observed: TREATMENT, ADDRESSLINK, IS_ELIGIBLE_CONTROL,
-        # HAS_PARTIAL_EXPOSURE_WITHIN_ADDRESSLINK). Normalize to lowercase first,
-        # then restore addressLink camelCase so grain_col references are consistent.
+        # ── Column-name case normalisation ──────────────────────────────────────
+        # Root cause: the Habu Clean Compute platform uppercases a subset of column
+        # names when it materialises the AllFeatures table between pipeline nodes.
+        # Observed uppercase columns in production:
+        #   TREATMENT, ADDRESSLINK, IS_ELIGIBLE_CONTROL,
+        #   HAS_PARTIAL_EXPOSURE_WITHIN_ADDRESSLINK
+        # All other AllFeatures columns arrive in their original lowercase/camelCase.
+        #
+        # Why this matters: PySpark column resolution is case-sensitive at the JVM
+        # layer. When LogisticRegression is configured with labelCol="treatment" and
+        # the DataFrame only contains "TREATMENT", the JVM throws:
+        #   IllegalArgumentException: treatment does not exist
+        # even though the column is visually present in the schema printout.
+        #
+        # Fix — two steps:
+        #   1. toDF(*[c.lower() ...]) lowercases every column name in one pass,
+        #      resolving TREATMENT → treatment, IS_ELIGIBLE_CONTROL →
+        #      is_eligible_control, HAS_PARTIAL_EXPOSURE_WITHIN_ADDRESSLINK →
+        #      has_partial_exposure_within_addresslink.
+        #   2. addressLink is camelCase, so step 1 produces "addresslink" (all lower).
+        #      The rest of this module references grain_col = "addressLink" and all
+        #      output_cols use F.col("addressLink"), so we rename it back to restore
+        #      the expected camelCase. The guard condition ensures this rename only
+        #      fires when addressLink is not already present (i.e. the platform did
+        #      uppercase it), making the block safe for environments that preserve case.
         all_features_df = all_features_df.toDF(*[c.lower() for c in all_features_df.columns])
         if "addresslink" in all_features_df.columns and "addressLink" not in all_features_df.columns:
             all_features_df = all_features_df.withColumnRenamed("addresslink", "addressLink")

@@ -185,10 +185,28 @@ class CustomCode:
         stats = ml_data_cv.agg(
             F.count("*").alias("total_count"),
             F.sum(F.col("treatment").cast(DoubleType())).alias("treated_count"),
-            # Unconditional average over ALL treated units (including $0 spenders) so
-            # that expected_spend = E[Y|T=1] - lift_value correctly estimates the
-            # counterfactual baseline. Filtering to Y>0 would mix a conditional
-            # expectation with the unconditional DML ATE, deflating lift_percent.
+            # ── Why unconditional average (no Y > 0 filter) ───────────────────
+            # lift_value (τ) is the Double-ML ATE: the average incremental spend
+            # caused by ad exposure across the ENTIRE treated population, including
+            # households that spent $0 during the campaign window. Formally:
+            #   τ = E[Y(1)] − E[Y(0)]   (unconditional, all T=1 units)
+            #
+            # avg_treatment_amount is used to back-calculate the counterfactual
+            # baseline (expected_amount), the spend we would have observed in the
+            # treatment group had they NOT been exposed:
+            #   expected_amount = E[Y|T=1] − τ  ≈  E[Y(0)|T=1]
+            #
+            # If we filter to Y > 0 we compute E[Y|T=1, Y>0] instead of E[Y|T=1].
+            # For a typical retail campaign with a 5–15% conversion rate,
+            # E[Y|T=1, Y>0] is 7–20× larger than E[Y|T=1] (only converters vs.
+            # all exposed). Subtracting an unconditional τ from a conditional
+            # average breaks the math:
+            #   WRONG:  expected_amount = E[Y|T=1, Y>0] − τ   ← inflated denominator
+            #   CORRECT: expected_amount = E[Y|T=1]      − τ  ← matched estimands
+            #
+            # The inflated denominator suppresses lift_percent and its confidence
+            # intervals (lift_pct_ci_lower, lift_pct_ci_upper), making the reported
+            # percentage lift appear far smaller than the true effect.
             F.avg(F.when(
                 F.col("treatment") == 1,
                 F.col("post_campaign_total_order_value"),

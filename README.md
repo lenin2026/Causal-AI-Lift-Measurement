@@ -13,7 +13,8 @@ q79A (Conversion Preprocessing)  ──┐
                                     ├──► FeatureEngg (q82A)
 q80A (Exposure Preprocessing)  ────┘         └─ AllFeatures
                                                    └─► ML-PSM  ──────────► PSMMatchedFeatures
-                                                                                └─► ML-ATE  ──► lift estimate (summary row)
+                                                                                ├─► ML-ATE         ──► lift estimate (summary row)
+                                                                                └─► ML-ATE-PLACEBO ──► placebo τ̂ ≈ 0 (validation)
 ```
 
 **This is the primary pipeline for testing and production.**
@@ -25,6 +26,7 @@ q80A (Exposure Preprocessing)  ────┘         └─ AllFeatures
 | q82A | `FeatureEngg` | `raw_conversion`, `raw_exposure`, `sample_insights` | `AllFeatures` | Feature engineering — one row per addressLink |
 | q85A | `ML-PSM` | `AllFeatures` | `PSMMatchedFeatures` | Propensity Score Matching — treated + matched controls |
 | q86A | `ML-ATE` | `PSMMatchedFeatures` | lift summary row | Double-ML ATE / CATE estimation |
+| q86B | `ML-ATE-PLACEBO` | `PSMMatchedFeatures` | placebo summary row | Pre-period falsification — τ̂ should be ≈ 0 |
 
 ---
 
@@ -257,6 +259,28 @@ stratified_features_df = self.data_handler.read("StratifiedFeatures")
 
 ---
 
+### ML-ATE-PLACEBO
+
+**Path:** `ML-ATE-PLACEBO/`
+**Wheel:** `causal_ai_ate_placebo-<version>-py3-none-any.whl`
+**Input:** `PSMMatchedFeatures` (same as ML-ATE)
+**Output:** Single-row placebo summary (same schema as ML-ATE)
+
+Pre-period falsification test. Runs the identical Double-ML estimator as ML-ATE but substitutes
+`baseline_60d_revenue` (pre-campaign revenue) for `outcome_campaign_product_revenue` before
+calling `custom_func`. Because the campaign had not yet launched during the baseline window, the
+true causal effect is zero — a statistically significant τ̂ ≠ 0 here signals pre-existing spend
+imbalance between PSM-matched treatment and control groups, invalidating ML-ATE's lift estimate.
+
+**Expected result:** `lift_value ≈ 0`, `lift_p_value > 0.05`, confidence intervals spanning zero.
+
+**Connects to:** ML-PSM (q85A) — reads the same `PSMMatchedFeatures` output. Runs in parallel
+with ML-ATE; diagnostic only, does not feed any downstream node.
+
+See `ML-ATE-PLACEBO/README.md` for full interpretation guidance.
+
+---
+
 ## GCS Deployment (dev)
 
 Bucket: `gs://habu-client-org-e22e5112-cd94-42bf-a2b9-6f95b52115c6/`
@@ -278,6 +302,11 @@ cd ML-ATE && python3 setup.py bdist_wheel
 gsutil cp dist/causal_ai_ate-<version>-py3-none-any.whl \
   gs://habu-client-org-e22e5112-cd94-42bf-a2b9-6f95b52115c6/
 
+# ML-ATE-PLACEBO
+cd ML-ATE-PLACEBO && python3 setup.py bdist_wheel
+gsutil cp dist/causal_ai_ate_placebo-<version>-py3-none-any.whl \
+  gs://habu-client-org-e22e5112-cd94-42bf-a2b9-6f95b52115c6/
+
 # FeatureEnggStratify (alternative pipeline only)
 cd FeatureEnggStratify && python3 setup.py bdist_wheel
 gsutil cp dist/causal_ai_feature_engg_stratification-<version>-py3-none-any.whl \
@@ -292,6 +321,7 @@ gsutil cp dist/causal_ai_feature_engg_stratification-<version>-py3-none-any.whl 
 | `causal_ai_feature_engg_stratification` | 1.3 |
 | `causal_ai_psm` | 1.3 |
 | `causal_ai_ate` | 1.2, 1.3 |
+| `causal_ai_ate_placebo` | 1.3 |
 | `clean_compute_spark_transformer` | 1.2 |
 
 ---

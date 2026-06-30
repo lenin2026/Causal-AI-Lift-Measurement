@@ -185,9 +185,12 @@ class CustomCode:
         stats = ml_data_cv.agg(
             F.count("*").alias("total_count"),
             F.sum(F.col("treatment").cast(DoubleType())).alias("treated_count"),
-            # avg_treatment_spend only for exposed AND converted
+            # Unconditional average over ALL treated units (including $0 spenders) so
+            # that expected_spend = E[Y|T=1] - lift_value correctly estimates the
+            # counterfactual baseline. Filtering to Y>0 would mix a conditional
+            # expectation with the unconditional DML ATE, deflating lift_percent.
             F.avg(F.when(
-                (F.col("treatment") == 1) & (F.col("post_campaign_total_order_value") > 0),
+                F.col("treatment") == 1,
                 F.col("post_campaign_total_order_value"),
             )).alias("avg_treatment_spend"),
         ).collect()[0]

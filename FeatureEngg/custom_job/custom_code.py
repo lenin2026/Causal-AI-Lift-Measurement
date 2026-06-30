@@ -459,6 +459,16 @@ class CustomCode:
             )
             .withColumn(
                 "baseline_12m_revenue_sum_bin",
+                # ── Spend strata for PSM and exact-stratum matching ───────────
+                # The upper bound was previously a single "1000_plus" catch-all.
+                # Placebo testing revealed a significant pre-existing spend gap
+                # ($8.19/hh) between treatment and control even after PSM, traced
+                # to "whale" households (annual spend $2,500–$5,500+) being
+                # bucketed with casual $1,050/yr shoppers. The four new upper tiers
+                # prevent the matching engine from pairing households across
+                # meaningfully different spend trajectories. Lower-end granularity
+                # is preserved — it matters for distinguishing non-buyers (zero,
+                # lt_10) from occasional shoppers (10_to_49, 50_to_99).
                 F.when(F.col("baseline_12m_revenue_sum") == 0, F.lit("zero"))
                 .when(F.col("baseline_12m_revenue_sum") < 10, F.lit("lt_10"))
                 .when(F.col("baseline_12m_revenue_sum") < 50, F.lit("10_to_49"))
@@ -466,7 +476,12 @@ class CustomCode:
                 .when(F.col("baseline_12m_revenue_sum") < 250, F.lit("100_to_249"))
                 .when(F.col("baseline_12m_revenue_sum") < 500, F.lit("250_to_499"))
                 .when(F.col("baseline_12m_revenue_sum") < 1000, F.lit("500_to_999"))
-                .otherwise(F.lit("1000_plus")),
+                .when(F.col("baseline_12m_revenue_sum") < 2000, F.lit("1000_to_1999"))
+                .when(F.col("baseline_12m_revenue_sum") < 3500, F.lit("2000_to_3499"))
+                .when(F.col("baseline_12m_revenue_sum") < 5000, F.lit("3500_to_4999"))
+                .when(F.col("baseline_12m_revenue_sum") < 7500, F.lit("5000_to_7499"))
+                .when(F.col("baseline_12m_revenue_sum") < 12000, F.lit("7500_to_11999"))
+                .otherwise(F.lit("12000_plus")),
             )
             .withColumn(
                 "campaign_product_affinity_label",

@@ -327,10 +327,55 @@ class CustomCode:
             # PSM-specific columns — not in AllFeatures; added here for ML-ATE diagnostics
             F.col("propensity_score").cast(DoubleType()),
             F.col("treatment_group").cast(StringType()),
+            # ── Habu platform validation columns ──────────────────────────────
+            # The Habu Clean Compute result validator requires these four columns
+            # to be present in the PSMMatchedFeatures output schema. Without them
+            # the run succeeds computationally but fails the post-execution schema
+            # check with "Missing columns: [sampled_unit, stratum_rank, ...]".
+            #
+            # sampled_unit (LONG, always 1): marks every row in this table as a
+            #   unit that was selected (matched) into the final cohort. All rows
+            #   here are sampled by definition — treatment units were selected into
+            #   the exposed cohort and control units were selected by caliper 1:1
+            #   matching — so this is uniformly 1.
+            #
+            # stratum_rank (LONG): for control rows this is their deterministic
+            #   rank within the caliper bin (control_rank from the row_number window
+            #   ordered by xxhash64(addressLink)). Rank 1 = the first selected
+            #   control in that bin. For treatment rows there is no meaningful rank
+            #   (they are not ranked against each other), so null is used.
+            #
+            # treatment_addresslinks (STRING): the addressLink of this row when it
+            #   is a treatment unit; null for control rows. Allows the platform to
+            #   identify which addressLinks were in the treatment arm.
+            #
+            # candidate_control_addresslinks (STRING): the addressLink of this row
+            #   when it is a matched control unit; null for treatment rows. Allows
+            #   the platform to identify which addressLinks were selected as controls.
+            F.col("sampled_unit").cast(LongType()),
+            F.col("stratum_rank").cast(LongType()),
+            F.col("treatment_addresslinks").cast(StringType()),
+            F.col("candidate_control_addresslinks").cast(StringType()),
         ]
 
-        treated_output  = treated_scored.withColumn("treatment_group", F.lit("treatment"))
-        control_output  = matched_control.withColumn("treatment_group", F.lit("matched_control"))
+        # Add treatment_group and the four platform validation columns to each arm
+        # before the final select so output_cols can reference them uniformly.
+        treated_output = (
+            treated_scored
+            .withColumn("treatment_group", F.lit("treatment"))
+            .withColumn("sampled_unit", F.lit(1).cast(LongType()))
+            .withColumn("stratum_rank", F.lit(None).cast(LongType()))
+            .withColumn("treatment_addresslinks", F.col("addressLink").cast(StringType()))
+            .withColumn("candidate_control_addresslinks", F.lit(None).cast(StringType()))
+        )
+        control_output = (
+            matched_control
+            .withColumn("treatment_group", F.lit("matched_control"))
+            .withColumn("sampled_unit", F.lit(1).cast(LongType()))
+            .withColumn("stratum_rank", F.col("control_rank").cast(LongType()))
+            .withColumn("treatment_addresslinks", F.lit(None).cast(StringType()))
+            .withColumn("candidate_control_addresslinks", F.col("addressLink").cast(StringType()))
+        )
 
         return (
             treated_output.select(*output_cols)

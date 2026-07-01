@@ -403,6 +403,15 @@ class CustomCode:
                 F.sum(F.when(outcome_campaign_w & campaign_product_w, F.col("quantity")).otherwise(F.lit(0.0))).alias(
                     "outcome_campaign_product_quantity"
                 ),
+                F.countDistinct(F.when(outcome_campaign_w, F.col("order_id")))
+                .cast(LongType())
+                .alias("outcome_total_campaign_orders"),
+                F.sum(
+                    F.when(
+                        outcome_campaign_w & positive_amount_w,
+                        F.col("transaction_amount"),
+                    ).otherwise(F.lit(0.0))
+                ).alias("outcome_total_campaign_revenue"),
             )
             .withColumn(
                 "days_since_last_baseline_purchase",
@@ -587,6 +596,7 @@ class CustomCode:
             "lapsed_60d_buyer",
             "outcome_campaign_product_orders",
             "outcome_campaign_product_buyer",
+            "outcome_total_campaign_orders",
         ]
         double_fill_columns = [
             "baseline_12m_revenue_sum",
@@ -602,6 +612,7 @@ class CustomCode:
             "campaign_product_revenue_share",
             "outcome_campaign_product_revenue",
             "outcome_campaign_product_quantity",
+            "outcome_total_campaign_revenue",
         ]
         string_fill_columns = [
             "poc_label",
@@ -691,6 +702,8 @@ class CustomCode:
             F.col("outcome_campaign_product_revenue").cast(DoubleType()),
             F.col("outcome_campaign_product_quantity").cast(DoubleType()),
             F.col("outcome_campaign_product_buyer").cast(IntegerType()),
+            F.col("outcome_total_campaign_orders").cast(LongType()),
+            F.col("outcome_total_campaign_revenue").cast(DoubleType()),
         ]
 
         return final_df.select(*output_cols).orderBy(F.desc("treatment"), F.col("addressLink"))

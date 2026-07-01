@@ -62,14 +62,14 @@ class Transformation:
         # so that custom_func runs the exact same Double-ML estimator on a window
         # where the treatment could not have caused any effect (the campaign had
         # not yet launched). The column rename makes the swap transparent to
-        # custom_func: it still reads "outcome_campaign_product_revenue" but now
+        # custom_func: it still reads "outcome_total_campaign_revenue" but now
         # those values are drawn from the pre-period baseline, not the campaign.
         # A τ̂ ≠ 0 here signals pre-existing imbalance between treatment and
         # matched-control groups — a failure of the PSM covariate balance step.
         from pyspark.sql import functions as F
         from pyspark.sql.types import DoubleType
         psm_matched_features_df = psm_matched_features_df.withColumn(
-            "outcome_campaign_product_revenue",
+            "outcome_total_campaign_revenue",
             F.col("baseline_60d_revenue").cast(DoubleType()),
         )
 

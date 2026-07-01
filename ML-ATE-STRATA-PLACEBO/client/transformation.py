@@ -64,7 +64,7 @@ class Transformation:
         from pyspark.sql import functions as F
         from pyspark.sql.types import DoubleType
         psm_matched_features_df = psm_matched_features_df.withColumn(
-            "outcome_campaign_product_revenue",
+            "outcome_total_campaign_revenue",
             F.col("baseline_60d_revenue").cast(DoubleType()),
         )
 

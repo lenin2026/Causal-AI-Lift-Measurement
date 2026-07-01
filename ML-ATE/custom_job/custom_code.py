@@ -25,7 +25,7 @@ class CustomCode:
         final_df = (
             final_df
             .withColumn("post_campaign_total_order_value",
-                        F.col("outcome_campaign_product_revenue").cast(DoubleType()))
+                        F.col("outcome_total_campaign_revenue").cast(DoubleType()))
             .withColumn("pre_campaign_total_order_value",
                         F.col("baseline_12m_revenue_sum").cast(DoubleType()))
             .withColumn("baseline_60d_revenue",

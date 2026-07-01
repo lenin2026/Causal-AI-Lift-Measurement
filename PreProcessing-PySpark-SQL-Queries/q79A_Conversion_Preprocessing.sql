@@ -150,6 +150,34 @@ conversion_rows_mapped_to_addresslink AS (
     ON c.lr_id = eia.lr_id
   LEFT JOIN campaign_products cp
     ON c.product_id = cp.product_id
+),
+-- A person can have multiple lr_ids (multiple emails). If two lr_ids for the same
+-- person both resolve to the same addressLink and share an order_id, the join above
+-- produces duplicate transaction rows. Deduplicate at the addressLink-order-product
+-- grain so FeatureEngg SUM aggregations are not inflated.
+conversion_rows_deduped AS (
+  SELECT
+    addressLink,
+    hhpel,
+    Grouping_Indicator,
+    online_identity_id,
+    campaign_id,
+    order_id,
+    CAST(product_id AS BIGINT) AS product_id,
+    product_brand,
+    banner,
+    division,
+    transaction_category,
+    transaction_timestamp_unix,
+    transaction_date,
+    transaction_amount,
+    quantity,
+    is_campaign_product,
+    ROW_NUMBER() OVER (
+      PARTITION BY addressLink, order_id, transaction_timestamp_unix, CAST(product_id AS BIGINT)
+      ORDER BY transaction_amount DESC NULLS LAST, quantity DESC NULLS LAST
+    ) AS rn
+  FROM conversion_rows_mapped_to_addresslink
 )
 SELECT
   addressLink,
@@ -158,7 +186,7 @@ SELECT
   online_identity_id,
   campaign_id,
   order_id,
-  CAST(product_id AS BIGINT) AS product_id,
+  product_id,
   product_brand,
   banner,
   division,
@@ -168,4 +196,5 @@ SELECT
   transaction_amount,
   quantity,
   is_campaign_product
-FROM conversion_rows_mapped_to_addresslink;
+FROM conversion_rows_deduped
+WHERE rn = 1;

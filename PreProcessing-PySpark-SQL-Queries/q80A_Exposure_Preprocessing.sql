@@ -49,6 +49,16 @@ eligible_mapped_online_identity_to_addresslink AS (
     AND d.addressLink <> ''
     AND m.rampid_meta IS NOT NULL
 ),
+-- One Meta identity (tp_id) can map to multiple Grouping_Indicators (persons) at the
+-- same addressLink when different household members share an online identity. Using
+-- the full (online_identity_id, addressLink, Grouping_Indicator) tuple for the
+-- exposure join causes SUM(exposure_frequency_deduped) to be counted once per
+-- Grouping_Indicator row rather than once per identity. Deduplicate to
+-- (online_identity_id, addressLink) before joining exposure counts.
+eligible_identity_addresslink_deduped AS (
+  SELECT DISTINCT online_identity_id, addressLink
+  FROM eligible_mapped_online_identity_to_addresslink
+),
 exposure_deduped AS (
   SELECT
     tp_id,
@@ -94,36 +104,40 @@ campaign_exposed_online_identities AS (
   FROM exposure_deduped
   GROUP BY tp_id
 ),
+-- Exposure flag at (online_identity_id, addressLink) grain — no Grouping_Indicator here
+-- so SUM(exposure_frequency_deduped) is counted exactly once per identity per addressLink.
 eligible_online_identity_with_exposure_flag AS (
   SELECT
-    em.online_identity_id,
-    em.addressLink,
-    em.Grouping_Indicator,
-    em.hhpel,
+    eid.online_identity_id,
+    eid.addressLink,
     ce.min_exposure_ts,
     ce.exposure_frequency_deduped,
     CASE WHEN ce.tp_id IS NOT NULL THEN 1 ELSE 0 END AS online_identity_exposed
-  FROM eligible_mapped_online_identity_to_addresslink em
+  FROM eligible_identity_addresslink_deduped eid
   LEFT JOIN campaign_exposed_online_identities ce
-    ON em.online_identity_id = ce.tp_id
+    ON eid.online_identity_id = ce.tp_id
 ),
 addresslink_treatment_assignment_after_any_online_identity_exposure_rollup AS (
   SELECT
-    addressLink,
-    MAX(online_identity_exposed) AS treatment,
-    MIN(CASE WHEN online_identity_exposed = 1 THEN min_exposure_ts END) AS min_exposure_ts,
-    SUM(CASE WHEN online_identity_exposed = 1 THEN exposure_frequency_deduped ELSE 0 END) AS exposure_frequency_deduped,
-    COUNT(DISTINCT online_identity_id) AS mapped_online_identity_count,
-    COUNT(DISTINCT CASE WHEN online_identity_exposed = 1 THEN online_identity_id END) AS exposed_online_identity_count,
-    COUNT(DISTINCT Grouping_Indicator) AS person_record_count,
-    COUNT(DISTINCT hhpel) AS hhpel_count,
+    ef.addressLink,
+    MAX(ef.online_identity_exposed) AS treatment,
+    MIN(CASE WHEN ef.online_identity_exposed = 1 THEN ef.min_exposure_ts END) AS min_exposure_ts,
+    SUM(CASE WHEN ef.online_identity_exposed = 1 THEN ef.exposure_frequency_deduped ELSE 0 END) AS exposure_frequency_deduped,
+    COUNT(DISTINCT ef.online_identity_id) AS mapped_online_identity_count,
+    COUNT(DISTINCT CASE WHEN ef.online_identity_exposed = 1 THEN ef.online_identity_id END) AS exposed_online_identity_count,
+    -- Rejoin original mapping for person/hhpel counts; COUNT DISTINCT is safe with duplicates
+    COUNT(DISTINCT em.Grouping_Indicator) AS person_record_count,
+    COUNT(DISTINCT em.hhpel) AS hhpel_count,
     CASE
-      WHEN COUNT(DISTINCT CASE WHEN online_identity_exposed = 1 THEN online_identity_id END) > 0
-       AND COUNT(DISTINCT CASE WHEN online_identity_exposed = 0 THEN online_identity_id END) > 0
+      WHEN COUNT(DISTINCT CASE WHEN ef.online_identity_exposed = 1 THEN ef.online_identity_id END) > 0
+       AND COUNT(DISTINCT CASE WHEN ef.online_identity_exposed = 0 THEN ef.online_identity_id END) > 0
       THEN 1 ELSE 0
     END AS has_partial_exposure_within_addresslink
-  FROM eligible_online_identity_with_exposure_flag
-  GROUP BY addressLink
+  FROM eligible_online_identity_with_exposure_flag ef
+  LEFT JOIN eligible_mapped_online_identity_to_addresslink em
+    ON ef.online_identity_id = em.online_identity_id
+   AND ef.addressLink = em.addressLink
+  GROUP BY ef.addressLink
 ),
 addresslink_assignment_with_control_flag AS (
   SELECT

@@ -125,7 +125,7 @@ addresslink_treatment_assignment_after_any_online_identity_exposure_rollup AS (
     SUM(CASE WHEN ef.online_identity_exposed = 1 THEN ef.exposure_frequency_deduped ELSE 0 END) AS exposure_frequency_deduped,
     COUNT(DISTINCT ef.online_identity_id) AS mapped_online_identity_count,
     COUNT(DISTINCT CASE WHEN ef.online_identity_exposed = 1 THEN ef.online_identity_id END) AS exposed_online_identity_count,
-    -- Rejoin original mapping for person/hhpel counts; COUNT DISTINCT is safe with duplicates
+    -- Rejoin original mapping for person/hhpel counts (COUNT DISTINCT is safe with duplicates)
     COUNT(DISTINCT em.Grouping_Indicator) AS person_record_count,
     COUNT(DISTINCT em.hhpel) AS hhpel_count,
     CASE

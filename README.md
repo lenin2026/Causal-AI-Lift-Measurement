@@ -120,7 +120,8 @@ Key outputs:
 | `baseline_12m_quantity_sum` | 12-month pre-campaign quantity |
 | `baseline_12m_revenue_sum_bin` | Revenue stratum (8 tiers) used for exact matching |
 | `baseline_buyer_label` | `recent_buyer` / `lapsed_buyer` / `no_12m_purchase` |
-| `outcome_campaign_product_revenue` | Campaign-period revenue (outcome, not covariate) |
+| `outcome_total_campaign_revenue` | Campaign-period total spend across all products (outcome, not covariate) |
+| `outcome_campaign_product_revenue` | Campaign-period spend on promoted SKUs only (legacy; not used by ATE nodes) |
 | `outcome_campaign_product_buyer` | Campaign-period buyer flag (outcome, not covariate) |
 
 **Column rename history (v1.3):**
@@ -211,7 +212,7 @@ and Conditional Average Treatment Effect (CATE) estimation.
 
 **Model pipeline:**
 
-1. **Column mapping** — `outcome_campaign_product_revenue` → `post_campaign_total_order_value`; `baseline_12m_revenue_sum` → `pre_campaign_total_order_value`
+1. **Column mapping** — `outcome_total_campaign_revenue` → `post_campaign_total_order_value`; `baseline_12m_revenue_sum` → `pre_campaign_total_order_value`
 2. **Derived demographics** — `est_age` (weighted midpoint from age-bucket counts); `est_income_code` (weighted average of 35 income codes); majority `gender` from household counts
 3. **99th-percentile winsorisation** — caps extreme spend values
 4. **K=5 cross-fitting** — outcome model (Huber regression) and treatment model (LR) fitted on training folds, predictions generated on held-out folds
@@ -271,7 +272,7 @@ stratified_features_df = self.data_handler.read("StratifiedFeatures")
 **Output:** Single-row placebo summary (same schema as ML-ATE)
 
 Pre-period falsification test. Runs the identical Double-ML estimator as ML-ATE but substitutes
-`baseline_60d_revenue` (pre-campaign revenue) for `outcome_campaign_product_revenue` before
+`baseline_60d_revenue` (pre-campaign revenue) for `outcome_total_campaign_revenue` before
 calling `custom_func`. Because the campaign had not yet launched during the baseline window, the
 true causal effect is zero — a statistically significant τ̂ ≠ 0 here signals pre-existing spend
 imbalance between PSM-matched treatment and control groups, invalidating ML-ATE's lift estimate.

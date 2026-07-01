@@ -13,8 +13,10 @@ q79A (Conversion Preprocessing)  ──┐
                                     ├──► FeatureEngg (q82A)
 q80A (Exposure Preprocessing)  ────┘         └─ AllFeatures
                                                    └─► ML-PSM  ──────────► PSMMatchedFeatures
-                                                                                ├─► ML-ATE         ──► lift estimate (summary row)
-                                                                                └─► ML-ATE-PLACEBO ──► placebo τ̂ ≈ 0 (validation)
+                                                                                ├─► ML-ATE              ──► lift estimate (linear DML)
+                                                                                ├─► ML-ATE-PLACEBO      ──► placebo τ̂ ≈ 0 (validation)
+                                                                                ├─► ML-ATE-XGBOOST      ──► lift estimate (GBT DML)
+                                                                                └─► ML-ATE-XGBOOST-PLACEBO ──► placebo τ̂ ≈ 0 (GBT validation)
 ```
 
 **This is the primary pipeline for testing and production.**
@@ -25,8 +27,10 @@ q80A (Exposure Preprocessing)  ────┘         └─ AllFeatures
 | q80A | `PreProcessing` | `@exposure`, `@mapping`, `@demographics` | `raw_exposure` | Aggregate exposures to addressLink; assign treatment flag |
 | q82A | `FeatureEngg` | `raw_conversion`, `raw_exposure`, `sample_insights` | `AllFeatures` | Feature engineering — one row per addressLink |
 | q85A | `ML-PSM` | `AllFeatures` | `PSMMatchedFeatures` | Propensity Score Matching — treated + matched controls |
-| q86A | `ML-ATE` | `PSMMatchedFeatures` | lift summary row | Double-ML ATE / CATE estimation |
+| q86A | `ML-ATE` | `PSMMatchedFeatures` | lift summary row | Double-ML ATE / CATE estimation (linear nuisance) |
 | q86B | `ML-ATE-PLACEBO` | `PSMMatchedFeatures` | placebo summary row | Pre-period falsification — τ̂ should be ≈ 0 |
+| q87A | `ML-ATE-XGBOOST` | `PSMMatchedFeatures` | lift summary row | Double-ML ATE / CATE estimation (GBT nuisance, 68 features) |
+| q87B | `ML-ATE-XGBOOST-PLACEBO` | `PSMMatchedFeatures` | placebo summary row | Pre-period falsification for GBT node |
 
 ---
 
@@ -281,6 +285,38 @@ See `ML-ATE-PLACEBO/README.md` for full interpretation guidance.
 
 ---
 
+### ML-ATE-XGBOOST
+
+**Path:** `ML-ATE-XGBOOST/`
+**Wheel:** `causal_ai_ate_xgboost-1.3-py3-none-any.whl`
+**Input:** `PSMMatchedFeatures` (same as ML-ATE)
+**Output:** Single-row lift summary (identical 24-column schema as ML-ATE)
+
+Replaces the linear/logistic nuisance models in ML-ATE with PySpark `GBTRegressor` (outcome model,
+L1 absolute loss) and `GBTClassifier` (treatment model). Uses 68 features versus ML-ATE's 11,
+including raw age-bucket counts (8), raw income code counts (35), behavioral engagement flags,
+and ordinal-encoded revenue bin and buyer label.
+
+Key hyperparameters: `maxIter=50`, `maxDepth=5`, `stepSize=0.1`, `subsamplingRate=0.8`, `seed=42`.
+
+See `ML-ATE-XGBOOST/XGBoostFeatureEngineering.md` for full feature selection, encoding decisions,
+and GBT-vs-linear rationale.
+
+---
+
+### ML-ATE-XGBOOST-PLACEBO
+
+**Path:** `ML-ATE-XGBOOST-PLACEBO/`
+**Wheel:** `causal_ai_ate_xgboost_placebo-1.3-py3-none-any.whl`
+**Input:** `PSMMatchedFeatures` (same as ML-ATE-XGBOOST)
+**Output:** Single-row placebo summary (same 24-column schema)
+
+Pre-period falsification test for ML-ATE-XGBOOST. Substitutes `baseline_60d_revenue` for
+`outcome_total_campaign_revenue` before calling `custom_func`. Identical GBT pipeline otherwise.
+Expected result: `lift_value ≈ 0`, `lift_p_value > 0.05`.
+
+---
+
 ## GCS Deployment (dev)
 
 Bucket: `gs://habu-client-org-e22e5112-cd94-42bf-a2b9-6f95b52115c6/`
@@ -307,6 +343,16 @@ cd ML-ATE-PLACEBO && python3 setup.py bdist_wheel
 gsutil cp dist/causal_ai_ate_placebo-<version>-py3-none-any.whl \
   gs://habu-client-org-e22e5112-cd94-42bf-a2b9-6f95b52115c6/
 
+# ML-ATE-XGBOOST
+cd ML-ATE-XGBOOST && python3 setup.py bdist_wheel
+gsutil cp dist/causal_ai_ate_xgboost-1.3-py3-none-any.whl \
+  gs://habu-client-org-e22e5112-cd94-42bf-a2b9-6f95b52115c6/
+
+# ML-ATE-XGBOOST-PLACEBO
+cd ML-ATE-XGBOOST-PLACEBO && python3 setup.py bdist_wheel
+gsutil cp dist/causal_ai_ate_xgboost_placebo-1.3-py3-none-any.whl \
+  gs://habu-client-org-e22e5112-cd94-42bf-a2b9-6f95b52115c6/
+
 # FeatureEnggStratify (alternative pipeline only)
 cd FeatureEnggStratify && python3 setup.py bdist_wheel
 gsutil cp dist/causal_ai_feature_engg_stratification-<version>-py3-none-any.whl \
@@ -324,6 +370,8 @@ gsutil cp dist/causal_ai_feature_engg_stratification-<version>-py3-none-any.whl 
 | `causal_ai_ate_placebo` | 1.3 |
 | `causal_ai_ate_strata` | 1.3 |
 | `causal_ai_ate_strata_placebo` | 1.3 |
+| `causal_ai_ate_xgboost` | 1.3 |
+| `causal_ai_ate_xgboost_placebo` | 1.3 |
 | `clean_compute_spark_transformer` | 1.2 |
 
 ---

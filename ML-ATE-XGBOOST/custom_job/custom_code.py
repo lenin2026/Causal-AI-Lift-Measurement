@@ -17,10 +17,17 @@ class CustomCode:
     def custom_func(self, spark: SparkSession, final_df: DataFrame) -> DataFrame:
 
         # ── Column mapping ────────────────────────────────────────────────
+        # outcome_total_campaign_revenue is added by FeatureEngg v1.3+; fall back to
+        # outcome_campaign_product_revenue when running against older AllFeatures data.
+        _outcome_src = (
+            "outcome_total_campaign_revenue"
+            if "outcome_total_campaign_revenue" in final_df.columns
+            else "outcome_campaign_product_revenue"
+        )
         final_df = (
             final_df
             .withColumn("post_campaign_total_order_value",
-                        F.col("outcome_total_campaign_revenue").cast(DoubleType()))
+                        F.col(_outcome_src).cast(DoubleType()))
             .withColumn("pre_campaign_total_order_value",
                         F.col("baseline_12m_revenue_sum").cast(DoubleType()))
         )

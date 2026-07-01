@@ -196,8 +196,6 @@ class CustomCode:
         gbt_t = GBTClassifier(
             featuresCol="features",
             labelCol="treatment",
-            probabilityCol="probability",
-            rawPredictionCol="rawPrediction",
             predictionCol="t_pred",
             maxIter=50,
             maxDepth=5,

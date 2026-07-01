@@ -99,6 +99,7 @@ class CustomCode:
         ml_data = final_df
         assembler = VectorAssembler(
             inputCols=[
+                "pre_campaign_total_order_value",
                 "baseline_purchase_tenure_days",
                 "days_since_last_baseline_purchase",
                 "baseline_12m_avg_order_value",

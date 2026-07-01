@@ -320,21 +320,21 @@ gsutil cp dist/causal_ai_feature_engg_stratification-<version>-py3-none-any.whl 
 | `causal_ai_feature_engg` | 1.2, 1.3 |
 | `causal_ai_feature_engg_stratification` | 1.3 |
 | `causal_ai_psm` | 1.3 |
-| `causal_ai_ate` | 1.2, 1.3 |
+| `causal_ai_ate` | 1.3 |
 | `causal_ai_ate_placebo` | 1.3 |
+| `causal_ai_ate_strata` | 1.3 |
+| `causal_ai_ate_strata_placebo` | 1.3 |
 | `clean_compute_spark_transformer` | 1.2 |
 
 ---
 
 ## Versioning
 
-All modules follow the same `version/__init__.py` pattern:
+All modules are fixed at version `1.3`. **Never change `__version__`.**
 
-```python
-__version__ = "1.3"
-```
-
-Increment `__version__` before running `python3 setup.py bdist_wheel` to produce a new wheel.
+Rebuilding a wheel always produces `*-1.3-py3-none-any.whl` and overwrites the existing file in
+GCS. Habu node configurations reference the fixed filename — bumping the version would break all
+nodes until each one is manually reconfigured to point to the new filename.
 
 ---
 

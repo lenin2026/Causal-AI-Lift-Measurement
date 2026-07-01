@@ -28,6 +28,8 @@ class CustomCode:
                         F.col("outcome_campaign_product_revenue").cast(DoubleType()))
             .withColumn("pre_campaign_total_order_value",
                         F.col("baseline_12m_revenue_sum").cast(DoubleType()))
+            .withColumn("baseline_60d_revenue",
+                        F.col("baseline_60d_revenue").cast(DoubleType()))
         )
 
         # Majority gender per addressLink (used by StringIndexer)
@@ -73,11 +75,12 @@ class CustomCode:
 
         # -------------------------- CAUSAL MODELING --------------------------
 
-        post_spend_99p, pre_spend_99p = final_df.approxQuantile(
-            ["post_campaign_total_order_value", "pre_campaign_total_order_value"], [0.99], 0.01
+        post_spend_99p, pre_spend_99p, b60d_99p = final_df.approxQuantile(
+            ["post_campaign_total_order_value", "pre_campaign_total_order_value", "baseline_60d_revenue"], [0.99], 0.01
         )
         post_spend_99p = post_spend_99p[0]
         pre_spend_99p  = pre_spend_99p[0]
+        b60d_99p       = b60d_99p[0]
 
         final_df = final_df.withColumn(
             "post_campaign_total_order_value",
@@ -89,6 +92,11 @@ class CustomCode:
             F.when(F.col("pre_campaign_total_order_value") > pre_spend_99p, F.lit(pre_spend_99p))
             .otherwise(F.col("pre_campaign_total_order_value")),
         )
+        final_df = final_df.withColumn(
+            "baseline_60d_revenue",
+            F.when(F.col("baseline_60d_revenue") > b60d_99p, F.lit(b60d_99p))
+            .otherwise(F.col("baseline_60d_revenue")),
+        )
 
         # ── Encode categorical features ────────────────────────────────────
         for col, out in [("gender", "gender_index"),
@@ -99,6 +107,8 @@ class CustomCode:
         ml_data = final_df
         assembler = VectorAssembler(
             inputCols=[
+                "pre_campaign_total_order_value",
+                "baseline_60d_revenue",
                 "baseline_purchase_tenure_days",
                 "days_since_last_baseline_purchase",
                 "baseline_12m_avg_order_value",
